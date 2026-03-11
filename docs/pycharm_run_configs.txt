@@ -1,0 +1,24 @@
+# ============================================================
+# Configuraciones sugeridas para PyCharm
+# Run > Edit Configurations > + > Python
+# ============================================================
+
+# CONFIGURACIÓN 1: Pipeline Bronce
+# Script path : main.py
+# Parameters  : --layer bronze
+# Working dir : (raíz del proyecto)
+# Env vars    : cargados desde .env automáticamente
+
+# CONFIGURACIÓN 2: Setup Database
+# Script path : scripts/setup_database.py
+# Parameters  : (ninguno)
+
+# CONFIGURACIÓN 3: Tests
+# Usar la configuración pytest integrada de PyCharm
+# Working dir : (raíz del proyecto)
+# pytest args : tests/ -v
+
+# ============================================================
+# Tip: En PyCharm instala el plugin "EnvFile" para cargar
+# automáticamente las variables de .env en cada configuración
+# ============================================================

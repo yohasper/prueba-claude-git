@@ -1,0 +1,44 @@
+# ============================================================
+# .gitignore - DataWarehouse Project
+# ============================================================
+
+# Variables de entorno y secretos
+.env
+config/credentials/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Virtual environment
+venv/
+.venv/
+env/
+
+# PyCharm
+.idea/
+*.iml
+
+# Logs
+logs/*.log
+logs/*.json
+
+# Datos descargados temporalmente
+data/temp/
+data/raw/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# OS
+.DS_Store
+Thumbs.db
