@@ -10,6 +10,7 @@
 
 import sys
 import json
+import shutil
 import argparse
 import subprocess
 from pathlib import Path
@@ -17,6 +18,46 @@ from urllib.request import urlopen, Request
 from urllib.error import HTTPError
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
+
+
+def find_git() -> str:
+    """
+    Busca el ejecutable de git en el sistema.
+    Funciona en Windows, Mac y Linux.
+    """
+    # Primero intenta encontrarlo en el PATH
+    git = shutil.which("git")
+    if git:
+        return git
+
+    # Rutas comunes en Windows
+    windows_paths = [
+        r"C:\Program Files\Git\bin\git.exe",
+        r"C:\Program Files (x86)\Git\bin\git.exe",
+        r"C:\Users\{}\AppData\Local\Programs\Git\bin\git.exe".format(
+            Path.home().name
+        ),
+    ]
+    for path in windows_paths:
+        if Path(path).exists():
+            return path
+
+    print("✗ No se encontró Git instalado.")
+    print("  Descárgalo desde: https://git-scm.com/download/win")
+    sys.exit(1)
+
+
+GIT = find_git()
+
+
+def run_git(*args) -> subprocess.CompletedProcess:
+    """Ejecuta un comando git con la ruta correcta."""
+    return subprocess.run(
+        [GIT] + list(args),
+        capture_output=True,
+        text=True,
+        cwd=str(Path(__file__).parent.parent)
+    )
 
 
 def load_env() -> dict:
@@ -35,30 +76,18 @@ def load_env() -> dict:
 
 
 def get_current_branch() -> str:
-    """Obtiene la rama actual del repositorio local."""
-    result = subprocess.run(
-        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-        capture_output=True, text=True
-    )
+    result = run_git("rev-parse", "--abbrev-ref", "HEAD")
     return result.stdout.strip()
 
 
 def get_last_commit_message() -> str:
-    """Obtiene el mensaje del último commit para usarlo en el PR."""
-    result = subprocess.run(
-        ["git", "log", "-1", "--pretty=%s"],
-        capture_output=True, text=True
-    )
+    result = run_git("log", "-1", "--pretty=%s")
     return result.stdout.strip()
 
 
 def push_current_branch(branch: str):
-    """Hace push de la rama actual antes de crear el PR."""
     print(f"  → Haciendo push de '{branch}'...")
-    result = subprocess.run(
-        ["git", "push", "-u", "origin", branch],
-        capture_output=True, text=True
-    )
+    result = run_git("push", "-u", "origin", branch)
     if result.returncode != 0:
         print(f"  ⚠ Warning en push: {result.stderr.strip()}")
     else:
@@ -73,17 +102,6 @@ def create_pull_request(
     head: str = "dev",
     base: str = "qa",
 ) -> dict:
-    """
-    Crea un Pull Request via GitHub API.
-
-    Args:
-        token: Token de GitHub con permisos repo
-        repo:  Formato 'usuario/repositorio'
-        title: Título del PR
-        body:  Descripción del PR
-        head:  Rama origen (default: dev)
-        base:  Rama destino (default: qa)
-    """
     url = f"https://api.github.com/repos/{repo}/pulls"
 
     payload = json.dumps({
@@ -97,9 +115,9 @@ def create_pull_request(
         url,
         data=payload,
         headers={
-            "Authorization": f"token {token}",
-            "Accept":        "application/vnd.github+json",
-            "Content-Type":  "application/json",
+            "Authorization":        f"token {token}",
+            "Accept":               "application/vnd.github+json",
+            "Content-Type":         "application/json",
             "X-GitHub-Api-Version": "2022-11-28",
         },
         method="POST",
@@ -119,18 +137,18 @@ def parse_args():
     )
     parser.add_argument("--title", type=str, default=None,
                         help="Título del PR (default: último commit)")
-    parser.add_argument("--body", type=str, default=None,
+    parser.add_argument("--body",  type=str, default=None,
                         help="Descripción del PR")
-    parser.add_argument("--head", type=str, default="dev",
+    parser.add_argument("--head",  type=str, default="dev",
                         help="Rama origen (default: dev)")
-    parser.add_argument("--base", type=str, default="qa",
+    parser.add_argument("--base",  type=str, default="qa",
                         help="Rama destino (default: qa)")
     return parser.parse_args()
 
 
 def main():
-    args   = parse_args()
-    env    = load_env()
+    args  = parse_args()
+    env   = load_env()
 
     token = env.get("GITHUB_TOKEN")
     repo  = env.get("GITHUB_REPO")
@@ -160,15 +178,14 @@ def main():
     print("  CREANDO PULL REQUEST")
     print("=" * 55)
     print(f"  Repositorio : {repo}")
+    print(f"  Rama actual : {current_branch}")
     print(f"  Origen      : {args.head}")
     print(f"  Destino     : {args.base}")
     print(f"  Título      : {title}")
     print()
 
-    # Push de la rama actual antes de crear el PR
     push_current_branch(current_branch)
 
-    # Crear el PR
     try:
         pr = create_pull_request(
             token=token,
