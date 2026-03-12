@@ -88,10 +88,27 @@ def get_last_commit_message() -> str:
 def push_current_branch(branch: str):
     print(f"  → Haciendo push de '{branch}'...")
     result = run_git("push", "-u", "origin", branch)
-    if result.returncode != 0:
-        print(f"  ⚠ Warning en push: {result.stderr.strip()}")
-    else:
+
+    if result.returncode == 0:
         print(f"  ✓ Push exitoso")
+        return
+
+    # Si el remoto tiene cambios que no tenemos → pull --rebase y reintentar
+    if "fetch first" in result.stderr or "rejected" in result.stderr:
+        print(f"  ⚠ Remoto desactualizado, sincronizando...")
+        rebase = run_git("pull", "origin", branch, "--rebase")
+        if rebase.returncode != 0:
+            print(f"  ✗ Error en rebase: {rebase.stderr.strip()}")
+            sys.exit(1)
+        print(f"  ✓ Sincronización exitosa, reintentando push...")
+        retry = run_git("push", "-u", "origin", branch)
+        if retry.returncode != 0:
+            print(f"  ✗ Error en push tras rebase: {retry.stderr.strip()}")
+            sys.exit(1)
+        print(f"  ✓ Push exitoso")
+    else:
+        print(f"  ✗ Error en push: {result.stderr.strip()}")
+        sys.exit(1)
 
 
 def create_pull_request(
