@@ -1,4 +1,4 @@
-# 🏛️ DataWarehouse Pipeline — Arquitectura Medallón
+# 🏛️ DataWarehouse Pipeline — Arquitectura Medallón SHT
 
 Pipeline de datos en Python para ingesta de archivos Excel desde **Google Drive** 
 hacia una bodega de datos local en **PostgreSQL**, siguiendo la **arquitectura Medallón** 
