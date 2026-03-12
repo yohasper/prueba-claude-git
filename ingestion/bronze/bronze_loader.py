@@ -26,11 +26,21 @@ from utils.excel_reader import ExcelReader
 from utils.logger import logger
 
 
-# ── Tablas con staging (keyword → staging table) ─────────────
+# ── Tablas Excel con staging (keyword → staging table) ───────
 STAGING_TABLES = {
     "clientes":  "stg_clientes_nuevos",
     "productos": "stg_productos_nuevos",
     "ventas":    "stg_ventas_nuevos",
+}
+
+# ── Tablas de APIs con staging (keyword → staging table) ──────
+# El keyword debe coincidir exactamente con el table_name en main.py
+STAGING_TABLES_API = {
+    "api_paises": "stg_api_paises",
+    "api_posts":  "stg_api_posts",
+    # Agrega aquí cada tabla de API que quieras con staging:
+    # "api_ordenes":      "stg_api_ordenes",
+    # "api_clientes_ext": "stg_api_clientes_ext",
 }
 
 # ── Solo ventas usa carga incremental por ID ─────────────────
@@ -53,9 +63,14 @@ class BronzeLoader:
 
     # ── Llamar al inicio de cada ejecución ───────────────────
     def truncate_staging_tables(self):
-        """Trunca o crea las 3 tablas staging al inicio de cada ejecución."""
+        """
+        Trunca o crea todas las tablas staging al inicio de cada ejecución:
+          - stg_clientes_nuevos, stg_productos_nuevos, stg_ventas_nuevos (Excel)
+          - stg_api_* (APIs REST)
+        """
         logger.info("Preparando tablas staging de novedades...")
-        for keyword, stg_table in STAGING_TABLES.items():
+        all_staging = {**STAGING_TABLES, **STAGING_TABLES_API}
+        for keyword, stg_table in all_staging.items():
             try:
                 if postgres.table_exists(stg_table, self.schema):
                     postgres.execute_ddl(
@@ -87,6 +102,22 @@ class BronzeLoader:
             table_name = table_name[:63].rstrip("_")
         return table_name
 
+    def load_dataframe(
+        self,
+        df,
+        source_name: str,
+        target_table: str,
+    ) -> int:
+        """
+        Método principal — acepta un DataFrame de cualquier origen.
+        Reemplaza load_sheet() para la arquitectura multi-origen.
+        """
+        # Extraer file_name y sheet_name del source_name
+        parts = source_name.split(" / ")
+        file_name  = parts[0] if len(parts) > 0 else source_name
+        sheet_name = parts[-1] if len(parts) > 1 else source_name
+        return self.load_sheet(df=df, file_name=file_name, sheet_name=sheet_name, target_table=target_table)
+
     def load_sheet(
         self,
         df: pd.DataFrame,
@@ -113,15 +144,15 @@ class BronzeLoader:
         )
 
         # Detectar qué tipo de carga aplica
-        keyword    = self._get_keyword(target_table)
-        stg_table  = STAGING_TABLES.get(keyword)
-        id_col     = INCREMENTAL_ID.get(keyword)
+        keyword   = self._get_keyword(target_table)
+        stg_table = self._get_stg_table(keyword) if keyword else None
+        id_col    = INCREMENTAL_ID.get(keyword)
 
         if keyword and id_col:
-            # ventas → incremental
+            # ventas → incremental por ID + staging de nuevos
             rows = self._load_incremental(df_normalized, target_table, id_col, stg_table)
         elif keyword and stg_table:
-            # clientes / productos → replace completo + copia a staging
+            # clientes / productos / APIs → replace completo + copia a staging
             rows = self._load_replace_with_staging(df_normalized, target_table, stg_table)
         else:
             # resto → replace completo sin staging
@@ -244,7 +275,21 @@ class BronzeLoader:
 
     # ── Helper: detectar keyword de la tabla ─────────────────
     def _get_keyword(self, table_name: str) -> str | None:
+        """Busca el keyword en STAGING_TABLES (Excel) y STAGING_TABLES_API."""
+        # Primero busca en tablas Excel
         for keyword in STAGING_TABLES:
             if keyword in table_name.lower():
                 return keyword
+        # Luego busca en tablas de API (coincidencia exacta del table_name)
+        for keyword in STAGING_TABLES_API:
+            if keyword == table_name.lower():
+                return keyword
         return None
+
+    def _get_stg_table(self, keyword: str) -> str | None:
+        """Retorna el nombre de la tabla staging para el keyword dado."""
+        return STAGING_TABLES.get(keyword) or STAGING_TABLES_API.get(keyword)
+
+    def _is_api_source(self, table_name: str) -> bool:
+        """Retorna True si la tabla viene de una API (table_name en STAGING_TABLES_API)."""
+        return table_name.lower() in STAGING_TABLES_API
