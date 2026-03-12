@@ -21,10 +21,18 @@ class BronzePipeline:
 
     Flujo:
         1. Lista archivos Excel en la carpeta de Drive configurada
-        2. Por cada archivo: descarga, lee hojas, normaliza
-        3. Carga cada hoja como tabla en el schema 'bronze'
+        2. Filtra solo el archivo "ejercicio sesion 7" y las hojas
+           clientes, productos y ventas
+        3. Por cada hoja: descarga, normaliza y carga incremental por ID
         4. Registra cada carga en la tabla de control
     """
+
+    # ── Filtros de archivos y hojas permitidas ───────────────
+    # Solo se procesan archivos cuyo nombre contenga este texto
+    FILE_FILTER   = "Ejercicio Sesion #7"
+
+    # Solo se procesan hojas cuyos nombres contengan alguna de estas palabras
+    SHEET_FILTER  = ["clientes", "productos", "ventas"]
 
     def __init__(self, folder_id: Optional[str] = None):
         self.folder_id = folder_id or settings.gdrive.folder_id
@@ -55,6 +63,9 @@ class BronzePipeline:
         postgres.create_schema_if_not_exists(settings.db.schema_bronze)
         ensure_control_table()
 
+        # 2. Limpiar staging al inicio (novedades de ejecución anterior)
+        self.loader.truncate_staging_tables()
+
         # 2. Listar archivos
         try:
             files = self.drive.list_excel_files(self.folder_id)
@@ -66,11 +77,25 @@ class BronzePipeline:
             logger.warning("No se encontraron archivos Excel en la carpeta.")
             return summary
 
-        summary["total"] = len(files)
-        logger.info(f"Archivos a procesar: {len(files)}")
+        # Filtrar solo el archivo ejercicio_sesion_7
+        files_filtrados = [
+            f for f in files
+            if self.FILE_FILTER in f["name"]
+        ]
 
-        # 3. Procesar cada archivo
-        for file_meta in files:
+        if not files_filtrados:
+            logger.warning(
+                f"No se encontró archivo con '{self.FILE_FILTER}'. "
+                f"Archivos en Drive: {[f['name'] for f in files]}"
+            )
+            return summary
+
+        summary["total"] = len(files_filtrados)
+        logger.info(f"Archivos en Drive             : {len(files)}")
+        logger.info(f"Archivos a procesar (filtrado): {len(files_filtrados)}")
+
+        # 3. Procesar cada archivo filtrado
+        for file_meta in files_filtrados:
             self._process_file(file_meta, summary, force_reload, start_time)
 
         # Resumen final
@@ -126,8 +151,12 @@ class BronzePipeline:
             summary["errors"] += 1
             return
 
-        # Procesar cada hoja
+        # Procesar solo hojas permitidas (clientes, productos, ventas)
         for sheet_name, df in sheets.items():
+            sheet_lower = sheet_name.lower().replace(" ", "_")
+            if not any(kw in sheet_lower for kw in self.SHEET_FILTER):
+                logger.info(f"  ⏭ Hoja '{sheet_name}' omitida (no está en el filtro)")
+                continue
             self._process_sheet(
                 df=df,
                 file_id=file_id,
@@ -155,8 +184,14 @@ class BronzePipeline:
         # Nombre de tabla destino en bronce
         target_table = self.loader.build_table_name(file_name, sheet_name)
 
-        # Verificar si ya fue cargado
-        if not force_reload and was_already_loaded(file_name, sheet_name, source_modified_at):
+        # Las tablas incrementales (clientes, productos, ventas) SIEMPRE
+        # se procesan para detectar registros nuevos, aunque el archivo
+        # no haya cambiado desde la última ejecución.
+        is_incremental = any(
+            kw in sheet_name.lower() for kw in self.SHEET_FILTER
+        )
+
+        if not is_incremental and not force_reload and was_already_loaded(file_name, sheet_name, source_modified_at):
             logger.info(f"  ⏭ Omitido (ya cargado): {sheet_name} → {target_table}")
             register_ingestion(
                 file_name=file_name, sheet_name=sheet_name,

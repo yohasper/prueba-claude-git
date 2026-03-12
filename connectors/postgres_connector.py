@@ -133,6 +133,12 @@ class PostgresConnector:
         with self.get_connection() as conn:
             return pd.read_sql(text(query), conn, params=params)
 
+    def execute_ddl(self, statement: str):
+        """Ejecuta un comando DDL o DML sin retorno (CREATE, TRUNCATE, DROP, etc.)."""
+        with self.get_connection() as conn:
+            conn.execute(text(statement))
+            conn.commit()
+
     def close(self):
         """Cierra el engine y libera conexiones."""
         if self._engine:
